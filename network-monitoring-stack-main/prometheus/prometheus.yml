@@ -1,0 +1,80 @@
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+  scrape_timeout: 10s
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+rule_files:
+  - /etc/prometheus/alert-rules.yml
+
+scrape_configs:
+  # prometheus self-monitoring
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - localhost:9090
+
+  # node exporter - system metrics from all linux hosts
+  - job_name: node-exporter
+    static_configs:
+      - targets:
+          - 10.10.20.10:9100   # Wazuh/Monitoring server
+          - 10.10.20.11:9100   # ubuntu-server-01
+          - 10.10.20.12:9100   # ubuntu-server-02
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        regex: '([^:]+).*'
+        replacement: '${1}'
+      - source_labels: [__address__]
+        regex: '10\.10\.20\.10:.*'
+        target_label: role
+        replacement: siem
+
+  # blackbox exporter - icmp probes for uptime/sla tracking
+  # this is what feeds the SLA breach alert rules
+  - job_name: blackbox-icmp
+    metrics_path: /probe
+    params:
+      module:
+        - icmp
+    static_configs:
+      - targets:
+          - 10.10.99.1    # SW-DIST
+          - 10.10.99.11   # SW-ACC-1
+          - 10.10.99.12   # SW-ACC-2
+          - 10.0.1.1      # R1-CORE
+          - 10.10.20.10   # Wazuh/Monitoring
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  # snmp exporter - network device metrics via snmp
+  # requires SNMPv3 user configured on cisco switches (see enterprise-network-segmentation configs)
+  - job_name: snmp-network
+    metrics_path: /snmp
+    params:
+      module:
+        - if_mib
+    static_configs:
+      - targets:
+          - 10.10.99.1    # SW-DIST
+          - 10.10.99.11   # SW-ACC-1
+          - 10.10.99.12   # SW-ACC-2
+          - 10.0.1.1      # R1-CORE
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: snmp-exporter:9116

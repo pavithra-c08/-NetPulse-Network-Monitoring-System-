@@ -1,0 +1,87 @@
+groups:
+
+  - name: availability
+    rules:
+
+      # device unreachable via icmp - sla impact, page immediately
+      - alert: DeviceUnreachable
+        expr: probe_success{job="blackbox-icmp"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          category: availability
+        annotations:
+          summary: "Device {{ $labels.instance }} is unreachable"
+          description: "ICMP probe has failed for 2 minutes. Check physical connectivity and interface status."
+
+      # uptime dropped below 99.9% sla threshold in the rolling 30-day window
+      - alert: SLABreachUptime
+        expr: avg_over_time(probe_success{job="blackbox-icmp"}[30d]) * 100 < 99.9
+        for: 5m
+        labels:
+          severity: warning
+          category: sla
+        annotations:
+          summary: "SLA breach - {{ $labels.instance }} uptime below 99.9%"
+          description: "30-day rolling uptime is {{ $value | humanizePercentage }}. SLA target is 99.9%."
+
+  - name: performance
+    rules:
+
+      # high cpu on linux hosts - sustained over 5 minutes
+      - alert: HighCPUUsage
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 85
+        for: 5m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "High CPU usage on {{ $labels.instance }}"
+          description: "CPU usage is {{ $value | humanize }}% for more than 5 minutes."
+
+      # memory pressure - less than 10% free
+      - alert: LowMemory
+        expr: (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 < 10
+        for: 5m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "Low memory on {{ $labels.instance }}"
+          description: "Only {{ $value | humanize }}% memory available."
+
+      # disk filling up fast - less than 15% free on any mount
+      - alert: DiskSpaceLow
+        expr: (node_filesystem_avail_bytes{fstype!="tmpfs"} / node_filesystem_size_bytes{fstype!="tmpfs"}) * 100 < 15
+        for: 10m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "Low disk space on {{ $labels.instance }} mount {{ $labels.mountpoint }}"
+          description: "{{ $value | humanize }}% disk space remaining."
+
+  - name: network
+    rules:
+
+      # interface error rate spiking - usually a duplex mismatch or bad cable
+      - alert: HighInterfaceErrors
+        expr: rate(ifInErrors{job="snmp-network"}[5m]) + rate(ifOutErrors{job="snmp-network"}[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+          category: network
+        annotations:
+          summary: "High interface errors on {{ $labels.instance }}"
+          description: "Error rate {{ $value | humanize }} errors/sec on {{ $labels.ifDescr }}."
+
+      # interface down - check if it should be up
+      - alert: InterfaceDown
+        expr: ifOperStatus == 2
+        for: 2m
+        labels:
+          severity: warning
+          category: network
+        annotations:
+          summary: "Interface down on {{ $labels.instance }}"
+          description: "Interface {{ $labels.ifDescr }} is operationally down."
